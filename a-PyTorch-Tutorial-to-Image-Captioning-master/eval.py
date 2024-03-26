@@ -179,5 +179,5 @@ def evaluate(beam_size):
 
 
 if __name__ == '__main__':
-    beam_size = 1
+    beam_size = 3
     print("\nBLEU-4 score @ beam size of %d is %.4f." % (beam_size, evaluate(beam_size)))

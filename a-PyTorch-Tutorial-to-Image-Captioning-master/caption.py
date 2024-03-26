@@ -1,3 +1,4 @@
+import io
 import torch
 import torch.nn.functional as F
 import numpy as np
@@ -7,11 +8,15 @@ import matplotlib.pyplot as plt
 import matplotlib.cm as cm
 import skimage.transform
 import argparse
-from scipy.misc import imread, imresize
 from PIL import Image
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
+#变量位置
+image_path = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\test\test2.jpg'
+model_path = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\checkpoint\checkpoint_flickr8k_5_cap_per_img_5_min_word_freq.pth.tar'
+word_map_path = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\output_data\WORDMAP_flickr8k_5_cap_per_img_5_min_word_freq.json'
+beam_size = 3
+smooth = True  # 或 False，取决于你是否想要平滑alpha覆盖
 
 def caption_image_beam_search(encoder, decoder, image_path, word_map, beam_size=3):
     """
@@ -29,18 +34,22 @@ def caption_image_beam_search(encoder, decoder, image_path, word_map, beam_size=
     vocab_size = len(word_map)
 
     # Read image and process
-    img = imread(image_path)
+    #image_path = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\test\1.png'
+    img = Image.open(image_path)  # 使用Pillow打开图像
+    if img.mode != 'RGB':
+        img = img.convert('RGB')  # 确保图像是RGB模式
+
+    img = img.resize((256, 256), Image.Resampling.LANCZOS) #原版img = img.resize((256, 256), Image.ANTIALIAS)  # 调整图像大小
+    img = np.array(img) / 255.  # 将图像转换为numpy数组并归一化
     if len(img.shape) == 2:
         img = img[:, :, np.newaxis]
-        img = np.concatenate([img, img, img], axis=2)
-    img = imresize(img, (256, 256))
-    img = img.transpose(2, 0, 1)
-    img = img / 255.
+        img = np.concatenate([img, img, img], axis=2)  # 如果是灰度图，转换为RGB
+    img = img.transpose(2, 0, 1)  # 转换轴，以符合PyTorch的要求
     img = torch.FloatTensor(img).to(device)
-    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406],
-                                     std=[0.229, 0.224, 0.225])
+
+    normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
     transform = transforms.Compose([normalize])
-    image = transform(img)  # (3, 256, 256)
+    image = transform(torch.tensor(img))  # (3, 256, 256)
 
     # Encode
     image = image.unsqueeze(0)  # (1, 3, 256, 256)
@@ -104,14 +113,18 @@ def caption_image_beam_search(encoder, decoder, image_path, word_map, beam_size=
             top_k_scores, top_k_words = scores.view(-1).topk(k, 0, True, True)  # (s)
 
         # Convert unrolled indices to actual indices of scores
-        prev_word_inds = top_k_words / vocab_size  # (s)
-        next_word_inds = top_k_words % vocab_size  # (s)
+        prev_word_inds = top_k_words // vocab_size  # 使用整数除法
+        next_word_inds = top_k_words % vocab_size
+
+        # Cast indices to long data type
+        prev_word_inds = prev_word_inds.long()  # 确保索引为长整型
+        next_word_inds = next_word_inds.long()
 
         # Add new words to sequences, alphas
         seqs = torch.cat([seqs[prev_word_inds], next_word_inds.unsqueeze(1)], dim=1)  # (s, step+1)
         seqs_alpha = torch.cat([seqs_alpha[prev_word_inds], alpha[prev_word_inds].unsqueeze(1)],
-                               dim=1)  # (s, step+1, enc_image_size, enc_image_size)
-
+                        dim=1)  # (s, step+1, enc_image_size, enc_image_size)
+        
         # Which sequences are incomplete (didn't reach <end>)?
         incomplete_inds = [ind for ind, next_word in enumerate(next_word_inds) if
                            next_word != word_map['<end>']]
@@ -167,7 +180,7 @@ def visualize_att(image_path, seq, alphas, rev_word_map, smooth=True):
     for t in range(len(words)):
         if t > 50:
             break
-        plt.subplot(np.ceil(len(words) / 5.), 5, t + 1)
+        plt.subplot(int(np.ceil(len(words) / 5)), 5, t + 1)  # 确保使用正整数   plt.subplot(np.ceil(len(words) / 5.), 5, t + 1)
 
         plt.text(0, 1, '%s' % (words[t]), color='black', backgroundcolor='white', fontsize=12)
         plt.imshow(image)
@@ -186,7 +199,8 @@ def visualize_att(image_path, seq, alphas, rev_word_map, smooth=True):
 
 
 if __name__ == '__main__':
-    parser = argparse.ArgumentParser(description='Show, Attend, and Tell - Tutorial - Generate Caption')
+    
+    """  parser = argparse.ArgumentParser(description='Show, Attend, and Tell - Tutorial - Generate Caption')
 
     parser.add_argument('--img', '-i', help='path to image')
     parser.add_argument('--model', '-m', help='path to model')
@@ -194,10 +208,10 @@ if __name__ == '__main__':
     parser.add_argument('--beam_size', '-b', default=5, type=int, help='beam size for beam search')
     parser.add_argument('--dont_smooth', dest='smooth', action='store_false', help='do not smooth alpha overlay')
 
-    args = parser.parse_args()
+    args = parser.parse_args() """
 
     # Load model
-    checkpoint = torch.load(args.model, map_location=str(device))
+    checkpoint = torch.load(model_path, map_location=str(device))
     decoder = checkpoint['decoder']
     decoder = decoder.to(device)
     decoder.eval()
@@ -206,13 +220,13 @@ if __name__ == '__main__':
     encoder.eval()
 
     # Load word map (word2ix)
-    with open(args.word_map, 'r') as j:
+    with open(word_map_path, 'r') as j:
         word_map = json.load(j)
     rev_word_map = {v: k for k, v in word_map.items()}  # ix2word
 
     # Encode, decode with attention and beam search
-    seq, alphas = caption_image_beam_search(encoder, decoder, args.img, word_map, args.beam_size)
+    seq, alphas = caption_image_beam_search(encoder, decoder, image_path, word_map, beam_size)
     alphas = torch.FloatTensor(alphas)
 
     # Visualize caption and attention of best sequence
-    visualize_att(args.img, seq, alphas, rev_word_map, args.smooth)
+    visualize_att(image_path, seq, alphas, rev_word_map, smooth = True)
