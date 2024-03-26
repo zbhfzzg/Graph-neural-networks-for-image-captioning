@@ -3,12 +3,16 @@ import numpy as np
 import h5py
 import json
 import torch
-from scipy.misc import imread, imresize
+#from scipy.misc import imread, imresize              These two are removed
 from tqdm import tqdm
 from collections import Counter
 from random import seed, choice, sample
+#new
+from PIL import Image
+import torchvision.transforms.functional as TF
+from torchvision.transforms import Resize, ToTensor
 
-
+#Generate inputs
 def create_input_files(dataset, karpathy_json_path, image_folder, captions_per_image, min_word_freq, output_folder,
                        max_len=100):
     """
@@ -111,7 +115,7 @@ def create_input_files(dataset, karpathy_json_path, image_folder, captions_per_i
                 # Sanity check
                 assert len(captions) == captions_per_image
 
-                # Read images
+                """ # Read images
                 img = imread(impaths[i])
                 if len(img.shape) == 2:
                     img = img[:, :, np.newaxis]
@@ -119,7 +123,26 @@ def create_input_files(dataset, karpathy_json_path, image_folder, captions_per_i
                 img = imresize(img, (256, 256))
                 img = img.transpose(2, 0, 1)
                 assert img.shape == (3, 256, 256)
-                assert np.max(img) <= 255
+                assert np.max(img) <= 255 """
+
+                # 假设 impaths[i] 是图片的路径
+                image_path = impaths[i]
+
+                # 使用Pillow读取图片
+                img = Image.open(image_path).convert('RGB')  # 确保图片是三通道的RGB格式
+
+                # 使用torchvision进行图片大小调整
+                img = TF.resize(img, (256, 256))
+
+                # 将Pillow图像转换为Tensor，自动将像素值从[0, 255]规范化到[0, 1]
+                img = TF.to_tensor(img)
+
+                # 在这一步，不需要重新排列色彩通道，因为TF.to_tensor已经将图像从HWC转换为CHW格式
+                # 同样，由于TF.to_tensor已经规范化了像素值，我们可以跳过验证像素值范围的步骤
+
+                # 如果需要验证图像的形状，可以这样断言
+                assert img.shape == (3, 256, 256)
+                #中文注释到这里为止都是新加的代码
 
                 # Save image to HDF5 file
                 images[i] = img
@@ -220,6 +243,7 @@ def save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder
     :param bleu4: validation BLEU-4 score for this epoch
     :param is_best: is this checkpoint the best so far?
     """
+    filename = 'checkpoint_' + data_name + '.pth.tar'
     state = {'epoch': epoch,
              'epochs_since_improvement': epochs_since_improvement,
              'bleu-4': bleu4,
@@ -227,11 +251,14 @@ def save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder
              'decoder': decoder,
              'encoder_optimizer': encoder_optimizer,
              'decoder_optimizer': decoder_optimizer}
-    filename = 'checkpoint_' + data_name + '.pth.tar'
+    filepath = os.path.join(r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\checkpoint', filename)
+    torch.save(state, filepath)
     torch.save(state, filename)
     # If this checkpoint is the best so far, store a copy so it doesn't get overwritten by a worse checkpoint
     if is_best:
         torch.save(state, 'BEST_' + filename)
+    
+    print("Saving checkpoint to {}".format(filename))
 
 
 class AverageMeter(object):

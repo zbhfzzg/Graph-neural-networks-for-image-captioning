@@ -1,10 +1,11 @@
 import torch
 from torch import nn
 import torchvision
+from torchvision.models.resnet import ResNet101_Weights
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
+# Based on restnet 101 model
 class Encoder(nn.Module):
     """
     Encoder.
@@ -14,7 +15,8 @@ class Encoder(nn.Module):
         super(Encoder, self).__init__()
         self.enc_image_size = encoded_image_size
 
-        resnet = torchvision.models.resnet101(pretrained=True)  # pretrained ImageNet ResNet-101
+        #resnet = torchvision.models.resnet101(pretrained=True)  # pretrained ImageNet ResNet-101 已经不能够使用了，需要改为weight
+        resnet = torchvision.models.resnet101(weights=ResNet101_Weights.IMAGENET1K_V1)
 
         # Remove linear and pool layers (since we're not doing classification)
         modules = list(resnet.children())[:-2]
@@ -50,7 +52,7 @@ class Encoder(nn.Module):
             for p in c.parameters():
                 p.requires_grad = fine_tune
 
-
+#Attention 
 class Attention(nn.Module):
     """
     Attention Network.
@@ -85,7 +87,7 @@ class Attention(nn.Module):
 
         return attention_weighted_encoding, alpha
 
-
+# LSTM + Attention
 class DecoderWithAttention(nn.Module):
     """
     Decoder.

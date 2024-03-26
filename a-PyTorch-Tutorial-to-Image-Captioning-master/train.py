@@ -1,4 +1,5 @@
 import time
+import os
 import torch.backends.cudnn as cudnn
 import torch.optim
 import torch.utils.data
@@ -11,8 +12,8 @@ from utils import *
 from nltk.translate.bleu_score import corpus_bleu
 
 # Data parameters
-data_folder = '/media/ssd/caption data'  # folder with data files saved by create_input_files.py
-data_name = 'coco_5_cap_per_img_5_min_word_freq'  # base name shared by data files
+data_folder = r'C:\\Users\\Bohan Zhang\\Documents\\GitHub\\Graph-neural-networks-for-image-captioning\\a-PyTorch-Tutorial-to-Image-Captioning-master\\output_data'  # folder with data files saved by create_input_files.py
+data_name = 'flickr8k_5_cap_per_img_5_min_word_freq'  # base name shared by data files
 
 # Model parameters
 emb_dim = 512  # dimension of word embeddings
@@ -24,10 +25,10 @@ cudnn.benchmark = True  # set to true only if inputs to model are fixed size; ot
 
 # Training parameters
 start_epoch = 0
-epochs = 120  # number of epochs to train for (if early stopping is not triggered)
+epochs = 20  # number of epochs to train for (if early stopping is not triggered) #原为120
 epochs_since_improvement = 0  # keeps track of number of epochs since there's been an improvement in validation BLEU
-batch_size = 32
-workers = 1  # for data-loading; right now, only 1 works with h5py
+batch_size = 80  #原来是32
+workers = 0  # for data-loading; right now, only 1 works with h5py    #把workers改为0了
 encoder_lr = 1e-4  # learning rate for encoder if fine-tuning
 decoder_lr = 4e-4  # learning rate for decoder
 grad_clip = 5.  # clip gradients at an absolute value of
@@ -37,6 +38,11 @@ print_freq = 100  # print training/validation stats every __ batches
 fine_tune_encoder = False  # fine-tune encoder?
 checkpoint = None  # path to checkpoint, None if none
 
+# 指定保存生成字幕的文件的路径
+output_dir = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\output_data'
+output_file_path = os.path.join(output_dir, 'generated_captions.txt')
+# 确保输出目录存在
+os.makedirs(output_dir, exist_ok=True)
 
 def main():
     """
@@ -90,7 +96,7 @@ def main():
                                      std=[0.229, 0.224, 0.225])
     train_loader = torch.utils.data.DataLoader(
         CaptionDataset(data_folder, data_name, 'TRAIN', transform=transforms.Compose([normalize])),
-        batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
+        batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)   #把num_workers=workers 改成了 num_workers = 0
     val_loader = torch.utils.data.DataLoader(
         CaptionDataset(data_folder, data_name, 'VAL', transform=transforms.Compose([normalize])),
         batch_size=batch_size, shuffle=True, num_workers=workers, pin_memory=True)
@@ -176,8 +182,8 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
 
         # Remove timesteps that we didn't decode at, or are pads
         # pack_padded_sequence is an easy trick to do this
-        scores, _ = pack_padded_sequence(scores, decode_lengths, batch_first=True)
-        targets, _ = pack_padded_sequence(targets, decode_lengths, batch_first=True)
+        scores, *_ = pack_padded_sequence(scores, decode_lengths, batch_first=True)  #多加了一个*
+        targets, *_ = pack_padded_sequence(targets, decode_lengths, batch_first=True) #多加了一个*
 
         # Calculate loss
         loss = criterion(scores, targets)
@@ -232,6 +238,11 @@ def validate(val_loader, encoder, decoder, criterion):
     :param criterion: loss layer
     :return: BLEU-4 score
     """
+
+    # 假设 word_map 是你之前创建的映射字典，新添加的内容！！！！！！！！！！！！！！！！
+    rev_word_map = {v: k for k, v in word_map.items()}  # 从索引到单词的逆映射
+
+
     decoder.eval()  # eval mode (no dropout or batchnorm)
     if encoder is not None:
         encoder.eval()
@@ -267,8 +278,8 @@ def validate(val_loader, encoder, decoder, criterion):
             # Remove timesteps that we didn't decode at, or are pads
             # pack_padded_sequence is an easy trick to do this
             scores_copy = scores.clone()
-            scores, _ = pack_padded_sequence(scores, decode_lengths, batch_first=True)
-            targets, _ = pack_padded_sequence(targets, decode_lengths, batch_first=True)
+            scores, *_ = pack_padded_sequence(scores, decode_lengths, batch_first=True)   #这里做了修改  scores, _ = pack_padded_sequence(scores, decode_lengths, batch_first=True)
+            targets, *_ = pack_padded_sequence(targets, decode_lengths, batch_first=True)   #做了同样的修改targets, _ = pack_padded_sequence(targets, decode_lengths, batch_first=True)
 
             # Calculate loss
             loss = criterion(scores, targets)
@@ -296,6 +307,8 @@ def validate(val_loader, encoder, decoder, criterion):
             # references = [[ref1a, ref1b, ref1c], [ref2a, ref2b], ...], hypotheses = [hyp1, hyp2, ...]
 
             # References
+            #print(f"allcaps device: {allcaps.device}, sort_ind device: {sort_ind.device}")解决问题用的
+            sort_ind = sort_ind.to('cpu') #添加的代码！！！！！！！！！！！！！！！！！！！！！！！！
             allcaps = allcaps[sort_ind]  # because images were sorted in the decoder
             for j in range(allcaps.shape[0]):
                 img_caps = allcaps[j].tolist()
@@ -323,6 +336,18 @@ def validate(val_loader, encoder, decoder, criterion):
                 loss=losses,
                 top5=top5accs,
                 bleu=bleu4))
+        
+        # Save generated captions  新添加的！！！！！！！！！！！！！！！！！！！！！！！
+        with open(output_file_path, 'w') as file:
+            for i, pred in enumerate(hypotheses):
+                # 将预测的索引转换为单词
+                pred_caption = [rev_word_map[word_idx] for word_idx in pred if word_idx in rev_word_map]
+        
+                # 将单词列表转换为字符串
+                pred_caption_str = ' '.join(pred_caption)
+        
+                # 写入文件
+                file.write(f"Caption {i+1}: {pred_caption_str}\n")
 
     return bleu4
 
