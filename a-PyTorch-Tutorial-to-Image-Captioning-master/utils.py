@@ -228,7 +228,7 @@ def clip_gradient(optimizer, grad_clip):
                 param.grad.data.clamp_(-grad_clip, grad_clip)
 
 
-def save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer, decoder_optimizer,
+def save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer, decoder_optimizer, gcn_module,
                     bleu4, is_best):
     """
     Saves model checkpoint.
@@ -250,7 +250,8 @@ def save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder
              'encoder': encoder,
              'decoder': decoder,
              'encoder_optimizer': encoder_optimizer,
-             'decoder_optimizer': decoder_optimizer}
+             'decoder_optimizer': decoder_optimizer,
+             'gcn_module': gcn_module,}  # 保存GCN模块的状态
     filepath = os.path.join(r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\checkpoint', filename)
     torch.save(state, filepath)
     torch.save(state, filename)

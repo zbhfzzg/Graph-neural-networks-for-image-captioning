@@ -24,6 +24,10 @@ decoder.eval()
 encoder = checkpoint['encoder']
 encoder = encoder.to(device)
 encoder.eval()
+# GCN
+gcn_module = checkpoint['gcn_module']
+gcn_module = gcn_module.to(device)
+gcn_module.eval()
 
 # Load word map (word2ix)
 with open(word_map_file, 'r') as j:
@@ -68,15 +72,21 @@ def evaluate(beam_size):
 
         # Encode
         encoder_out = encoder(image)  # (1, enc_image_size, enc_image_size, encoder_dim)
-        enc_image_size = encoder_out.size(1)
-        encoder_dim = encoder_out.size(3)
+
+        # 现在，通过GCN模块处理encoder的输出
+        # 注意：你可能需要根据你的GCN模型的具体实现对输入进行适当的调整
+        # 假设你的GCN模块可以直接处理encoder_out的形状和维度
+        gcn_out = gcn_module(encoder_out)  # 通过GCN处理 新添加内容
+
+        enc_image_size = gcn_out.size(1)
+        encoder_dim = gcn_out.size(3)
 
         # Flatten encoding
-        encoder_out = encoder_out.view(1, -1, encoder_dim)  # (1, num_pixels, encoder_dim)
-        num_pixels = encoder_out.size(1)
+        gcn_out = gcn_out.view(1, -1, encoder_dim)  # (1, num_pixels, encoder_dim)
+        num_pixels = gcn_out.size(1)
 
         # We'll treat the problem as having a batch size of k
-        encoder_out = encoder_out.expand(k, num_pixels, encoder_dim)  # (k, num_pixels, encoder_dim)
+        gcn_out = gcn_out.expand(k, num_pixels, encoder_dim)  # (k, num_pixels, encoder_dim)
 
         # Tensor to store top k previous words at each step; now they're just <start>
         k_prev_words = torch.LongTensor([[word_map['<start>']]] * k).to(device)  # (k, 1)
@@ -93,14 +103,14 @@ def evaluate(beam_size):
 
         # Start decoding
         step = 1
-        h, c = decoder.init_hidden_state(encoder_out)
+        h, c = decoder.init_hidden_state(gcn_out)
 
         # s is a number less than or equal to k, because sequences are removed from this process once they hit <end>
         while True:
 
             embeddings = decoder.embedding(k_prev_words).squeeze(1)  # (s, embed_dim)
 
-            awe, _ = decoder.attention(encoder_out, h)  # (s, encoder_dim), (s, num_pixels)
+            awe, _ = decoder.attention(gcn_out, h)  # (s, encoder_dim), (s, num_pixels)
 
             gate = decoder.sigmoid(decoder.f_beta(h))  # gating scalar, (s, encoder_dim)
             awe = gate * awe
@@ -148,7 +158,7 @@ def evaluate(beam_size):
             seqs = seqs[incomplete_inds]
             h = h[prev_word_inds[incomplete_inds]]
             c = c[prev_word_inds[incomplete_inds]]
-            encoder_out = encoder_out[prev_word_inds[incomplete_inds]]
+            gcn_out = gcn_out[prev_word_inds[incomplete_inds]]
             top_k_scores = top_k_scores[incomplete_inds].unsqueeze(1)
             k_prev_words = next_word_inds[incomplete_inds].unsqueeze(1)
 
@@ -179,5 +189,5 @@ def evaluate(beam_size):
 
 
 if __name__ == '__main__':
-    beam_size = 3
+    beam_size = 1
     print("\nBLEU-4 score @ beam size of %d is %.4f." % (beam_size, evaluate(beam_size)))

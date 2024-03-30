@@ -18,7 +18,7 @@ word_map_path = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-fo
 beam_size = 3
 smooth = True  # 或 False，取决于你是否想要平滑alpha覆盖
 
-def caption_image_beam_search(encoder, decoder, image_path, word_map, beam_size=3):
+def caption_image_beam_search(encoder, decoder, gcn_module, image_path, word_map, beam_size=3):  #有过修改！！！
     """
     Reads an image and captions it with beam search.
 
@@ -52,18 +52,29 @@ def caption_image_beam_search(encoder, decoder, image_path, word_map, beam_size=
     image = transform(torch.tensor(img))  # (3, 256, 256)
 
     # Encode
-    image = image.unsqueeze(0)  # (1, 3, 256, 256)
-    encoder_out = encoder(image)  # (1, enc_image_size, enc_image_size, encoder_dim)
-    enc_image_size = encoder_out.size(1)
-    encoder_dim = encoder_out.size(3)
+    image = image.unsqueeze(0)  # (1, 3, 256, 256) 人为增加一个维度
+    encoder_out = encoder(image)  # (1, enc_image_size, enc_image_size, encoder_dim) same as torch.Size([1, 14, 14, 2048])
 
+    batch_size, H, W, encoder_dim = encoder_out.size()
+    enc_image_size = H  # Assuming H and W are equal and known
+
+    # 将encoder_out传递给GCNmodule
+    gcn_out = gcn_module(encoder_out) #torch.Size([1, 14, 14, 2048])
+
+    # 将gcn_out调整为(batch_size, num_pixels, encoder_dim)
+    gcn_out = gcn_out.permute(0, 3, 1, 2)  # 调整顺序为(batch_size, encoder_dim, H, W)
+    gcn_out_flattened = gcn_out.reshape(batch_size, encoder_dim, -1)  # 展平为(batch_size, encoder_dim, num_pixels) #torch.Size([1, 2048, 196])
+    gcn_out_flattened = gcn_out_flattened.permute(0, 2, 1)  # 最终形状为(batch_size, num_pixels, encoder_dim) #torch.Size([1, 196, 2048])
+    
     # Flatten encoding
-    encoder_out = encoder_out.view(1, -1, encoder_dim)  # (1, num_pixels, encoder_dim)
+    encoder_out = gcn_out_flattened  # (batch_size, num_pixels, encoder_dim)
+
+    print(encoder_out)
     num_pixels = encoder_out.size(1)
 
-    # We'll treat the problem as having a batch size of k
-    encoder_out = encoder_out.expand(k, num_pixels, encoder_dim)  # (k, num_pixels, encoder_dim)
-
+    # Expand encoder_out to prepare for beam search
+    encoder_out = encoder_out.expand(k, num_pixels, encoder_dim)
+  
     # Tensor to store top k previous words at each step; now they're just <start>
     k_prev_words = torch.LongTensor([[word_map['<start>']]] * k).to(device)  # (k, 1)
 
@@ -218,6 +229,10 @@ if __name__ == '__main__':
     encoder = checkpoint['encoder']
     encoder = encoder.to(device)
     encoder.eval()
+    # 加载GCN模块
+    gcn_module = checkpoint['gcn_module']
+    gcn_module = gcn_module.to(device)
+    gcn_module.eval()
 
     # Load word map (word2ix)
     with open(word_map_path, 'r') as j:
@@ -225,7 +240,7 @@ if __name__ == '__main__':
     rev_word_map = {v: k for k, v in word_map.items()}  # ix2word
 
     # Encode, decode with attention and beam search
-    seq, alphas = caption_image_beam_search(encoder, decoder, image_path, word_map, beam_size)
+    seq, alphas = caption_image_beam_search(encoder, decoder, gcn_module, image_path, word_map, beam_size)
     alphas = torch.FloatTensor(alphas)
 
     # Visualize caption and attention of best sequence

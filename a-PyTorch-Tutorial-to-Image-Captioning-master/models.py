@@ -1,11 +1,81 @@
 import torch
 from torch import nn
+import numpy as np
 import torchvision
 from torchvision.models.resnet import ResNet101_Weights
+from torch_geometric.nn import GCNConv # 用于GCN的model
+import torch_geometric.data as Data
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-# Based on restnet 101 model
+#adjacency_matrix   output is adj_matrix  shape [196,196]
+def build_adjacency_matrix():
+    adj_matrix = np.zeros((196, 196))  # 创建一个196x196的邻接矩阵
+    for row in range(14):
+        for col in range(14):
+            index = row * 14 + col  # 将2D坐标转换为一维索引
+            # 对于每个节点，检查其8邻域
+            for i in range(max(0, row-1), min(row+2, 14)):
+                for j in range(max(0, col-1), min(col+2, 14)):
+                    if i == row and j == col:
+                        continue  # 跳过自身
+                    neighbor_index = i * 14 + j
+                    adj_matrix[index, neighbor_index] = 1  # 标记为邻居
+    return adj_matrix      
+
+#Convert adjacency matrix to edge index  使用边索引而不是邻接矩阵可以在某些场景下降低内存占用
+def adjacency_matrix_to_edge_index(adj_matrix):
+    edge_index = np.array(adj_matrix.nonzero())
+    return torch.tensor(edge_index, dtype=torch.long)
+
+# 构建邻接矩阵
+adj_matrix = build_adjacency_matrix()
+# 转换为边索引    一共1404个边 shape[2,1404] 2是source to target   这个时候图里面的关系就转换成了edge_index
+edge_index = adjacency_matrix_to_edge_index(adj_matrix)
+
+
+#GCN module Input: (batch_size, encoded_image_size, encoded_image_size, 2048)  Output (batch_size, encoded_image_size, encoded_image_size, 2048) 
+class GCNModule(nn.Module):
+    def __init__(self, in_features, hidden_features, out_features, edge_index, encoded_image_size=14):
+        super(GCNModule, self).__init__()
+        self.in_features = in_features  # GCN输入特征维度
+        self.out_features = in_features  # 为了保持和ResNet输出一致，这里输出特征维度与输入相同
+        self.edge_index = edge_index  # 边索引
+        self.encoded_image_size = encoded_image_size  # 编码后的图像尺寸
+        # first layer of GCN，从in_features到hidden_features
+        self.gcn1 = GCNConv(in_features, hidden_features)
+        # Second layer of CN，从hidden_features到hidden_features
+        self.gcn2 = GCNConv(hidden_features, out_features)
+        self.relu = nn.ReLU()  # RelU
+        #self.adapter = nn.Linear(out_features, 2048)  # 确保这里的out_features与self.gcn2的输出维度匹配 新添加的
+
+    def forward(self, x):  #x is the output of Encoder. 缺少了邻接矩阵的输入呢！
+        batch_size, H, W, C = x.size()  # x的维度(batch_size, 14, 14, 2048)
+            #print(edge_index.shape)  #torch.Size([2, 1404])
+            #print(adj_matrix.shape)   
+            #print(x.shape) [200, 14, 14, 2048] 现在shape是正确的
+        x = x.permute(0, 3, 1, 2).reshape(-1, C)  # 调整x的维度为(N, in_features)  #原来是view，改为reshape permute 了之后[batch_size, channels, height, width]; N是196乘以batch_size,也就是图
+        #print(x.shape)  #现在的x size是这样的：torch.Size([39200, 2048]) batch size * 196
+
+        # 依次通过两层GCN
+        x = self.relu(self.gcn1(x, self.edge_index))  # 第一层GCN + ReLU; edge_index is here
+        # 第二层GCN + ReLU（在最后一层后也加ReLU）
+
+        print(x.shape) #torch.Size([39200, 1024])
+        x = self.relu(self.gcn2(x, self.edge_index))
+
+        print(x.shape) #torch.Size([39200, 2048])
+
+        # 将输出从GCN后的长列表转换回原始(batch_size, H, W, C)的形状
+        x = x.reshape(batch_size, H, W, self.out_features).permute(0, 3, 1, 2)  # 首先变回(batch_size, 14, 14, out_features) #原来是view，改为reshape
+        print("3")
+        print(x.shape) #torch.Size([200, 2048, 14, 14])
+        x = x.permute(0, 2, 3, 1)  # 最后调整为(batch_size, 14, 14, 2048) 注意out_features应当对应2048
+        print("4") #目前4没有出现呢
+        print(x.shape) #torch.Size([200, 14, 14, 2048])
+        return x
+
+# Based on restnet 101 model   Input（Resize image） output: (batch_size, encoded_image_size, encoded_image_size, 2048) 
 class Encoder(nn.Module):
     """
     Encoder.
@@ -36,7 +106,7 @@ class Encoder(nn.Module):
         """
         out = self.resnet(images)  # (batch_size, 2048, image_size/32, image_size/32)
         out = self.adaptive_pool(out)  # (batch_size, 2048, encoded_image_size, encoded_image_size)
-        out = out.permute(0, 2, 3, 1)  # (batch_size, encoded_image_size, encoded_image_size, 2048)
+        out = out.permute(0, 2, 3, 1)  # (batch_size, encoded_image_size, encoded_image_size, 2048)  这个是encoder的输出！！
         return out
 
     def fine_tune(self, fine_tune=True):

@@ -6,7 +6,7 @@ import torch.utils.data
 import torchvision.transforms as transforms
 from torch import nn
 from torch.nn.utils.rnn import pack_padded_sequence
-from models import Encoder, DecoderWithAttention
+from models import *
 from datasets import *
 from utils import *
 from nltk.translate.bleu_score import corpus_bleu
@@ -25,9 +25,9 @@ cudnn.benchmark = True  # set to true only if inputs to model are fixed size; ot
 
 # Training parameters
 start_epoch = 0
-epochs = 20  # number of epochs to train for (if early stopping is not triggered) #原为120
+epochs = 10  # number of epochs to train for (if early stopping is not triggered) #原为120
 epochs_since_improvement = 0  # keeps track of number of epochs since there's been an improvement in validation BLEU
-batch_size = 80  #原来是32
+batch_size = 200  #原来是32
 workers = 0  # for data-loading; right now, only 1 works with h5py    #把workers改为0了
 encoder_lr = 1e-4  # learning rate for encoder if fine-tuning
 decoder_lr = 4e-4  # learning rate for decoder
@@ -57,6 +57,10 @@ def main():
         word_map = json.load(j)
 
     # Initialize / load checkpoint
+    # 构建邻接矩阵并转换为边索引
+    adj_matrix = build_adjacency_matrix()
+    edge_index = adjacency_matrix_to_edge_index(adj_matrix).to(device)  # 确保edge_index在正确的设备上
+
     if checkpoint is None:
         decoder = DecoderWithAttention(attention_dim=attention_dim,
                                        embed_dim=emb_dim,
@@ -69,6 +73,8 @@ def main():
         encoder.fine_tune(fine_tune_encoder)
         encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
                                              lr=encoder_lr) if fine_tune_encoder else None
+        # 实例化GCNModule
+        gcn_module = GCNModule(in_features=2048, out_features=2048, hidden_features=1024, edge_index=edge_index, encoded_image_size=14).to(device)
 
     else:
         checkpoint = torch.load(checkpoint)
@@ -79,6 +85,14 @@ def main():
         decoder_optimizer = checkpoint['decoder_optimizer']
         encoder = checkpoint['encoder']
         encoder_optimizer = checkpoint['encoder_optimizer']
+        # 构建邻接矩阵并转换为边索引
+        
+        # 加载GCNModule，如果保存在checkpoint中
+        gcn_module = checkpoint.get('gcn_module')
+        if gcn_module is None:
+            # 如果checkpoint中没有GCNModule，则需要重新初始化
+            gcn_module = GCNModule(in_features=2048, out_features=2048, hidden_features=1024, edge_index=edge_index, encoded_image_size=14).to(device)
+        
         if fine_tune_encoder is True and encoder_optimizer is None:
             encoder.fine_tune(fine_tune_encoder)
             encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
@@ -119,13 +133,15 @@ def main():
               criterion=criterion,
               encoder_optimizer=encoder_optimizer,
               decoder_optimizer=decoder_optimizer,
-              epoch=epoch)
+              epoch=epoch,
+              gcn_module=gcn_module)
 
         # One epoch's validation
         recent_bleu4 = validate(val_loader=val_loader,
                                 encoder=encoder,
                                 decoder=decoder,
-                                criterion=criterion)
+                                criterion=criterion,
+                                gcn_module=gcn_module)
 
         # Check if there was an improvement
         is_best = recent_bleu4 > best_bleu4
@@ -138,10 +154,10 @@ def main():
 
         # Save checkpoint
         save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder, encoder_optimizer,
-                        decoder_optimizer, recent_bleu4, is_best)
+                        decoder_optimizer, gcn_module, recent_bleu4, is_best)
 
 
-def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_optimizer, epoch):
+def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_optimizer, epoch, gcn_module):
     """
     Performs one epoch's training.
 
@@ -175,6 +191,11 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
 
         # Forward prop.
         imgs = encoder(imgs)
+        
+        print(imgs.shape)
+        # 将特征图和边索引传递给GCNModule ！！！！！！！！
+        imgs = gcn_module(imgs)
+
         scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens)
 
         # Since we decoded starting with <start>, the targets are all words after <start>, up to <end>
@@ -228,7 +249,7 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
                                                                           top5=top5accs))
 
 
-def validate(val_loader, encoder, decoder, criterion):
+def validate(val_loader, encoder, decoder, criterion, gcn_module):
     """
     Performs one epoch's validation.
 
