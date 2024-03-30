@@ -168,6 +168,7 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
     :param encoder_optimizer: optimizer to update encoder's weights (if fine-tuning)
     :param decoder_optimizer: optimizer to update decoder's weights
     :param epoch: epoch number
+    :param gcn_module: GCN
     """
 
     decoder.train()  # train mode (dropout and batchnorm is used)
@@ -192,7 +193,6 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
         # Forward prop.
         imgs = encoder(imgs)
         
-        print(imgs.shape)
         # 将特征图和边索引传递给GCNModule ！！！！！！！！
         imgs = gcn_module(imgs)
 

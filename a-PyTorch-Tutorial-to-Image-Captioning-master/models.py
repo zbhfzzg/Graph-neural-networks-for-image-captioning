@@ -36,7 +36,7 @@ edge_index = adjacency_matrix_to_edge_index(adj_matrix)
 
 #GCN module Input: (batch_size, encoded_image_size, encoded_image_size, 2048)  Output (batch_size, encoded_image_size, encoded_image_size, 2048) 
 class GCNModule(nn.Module):
-    def __init__(self, in_features, hidden_features, out_features, edge_index, encoded_image_size=14):
+    def __init__(self, in_features, hidden_features, out_features, edge_index, encoded_image_size=14, dropout_rate=0.5):
         super(GCNModule, self).__init__()
         self.in_features = in_features  # GCN输入特征维度
         self.out_features = in_features  # 为了保持和ResNet输出一致，这里输出特征维度与输入相同
@@ -47,7 +47,8 @@ class GCNModule(nn.Module):
         # Second layer of CN，从hidden_features到hidden_features
         self.gcn2 = GCNConv(hidden_features, out_features)
         self.relu = nn.ReLU()  # RelU
-        #self.adapter = nn.Linear(out_features, 2048)  # 确保这里的out_features与self.gcn2的输出维度匹配 新添加的
+        # Dropout layer
+        self.dropout = nn.Dropout(dropout_rate)
 
     def forward(self, x):  #x is the output of Encoder. 缺少了邻接矩阵的输入呢！
         batch_size, H, W, C = x.size()  # x的维度(batch_size, 14, 14, 2048)
@@ -58,21 +59,17 @@ class GCNModule(nn.Module):
         #print(x.shape)  #现在的x size是这样的：torch.Size([39200, 2048]) batch size * 196
 
         # 依次通过两层GCN
-        x = self.relu(self.gcn1(x, self.edge_index))  # 第一层GCN + ReLU; edge_index is here
+        x = self.relu(self.gcn1(x, self.edge_index))  # 第一层GCN + ReLU; edge_index is here #torch.Size([39200, 1024])
+        x = self.dropout(x)
+
         # 第二层GCN + ReLU（在最后一层后也加ReLU）
-
-        print(x.shape) #torch.Size([39200, 1024])
-        x = self.relu(self.gcn2(x, self.edge_index))
-
-        print(x.shape) #torch.Size([39200, 2048])
+        x = self.relu(self.gcn2(x, self.edge_index))  #torch.Size([39200, 2048])
+        x = self.dropout(x)
 
         # 将输出从GCN后的长列表转换回原始(batch_size, H, W, C)的形状
-        x = x.reshape(batch_size, H, W, self.out_features).permute(0, 3, 1, 2)  # 首先变回(batch_size, 14, 14, out_features) #原来是view，改为reshape
-        print("3")
-        print(x.shape) #torch.Size([200, 2048, 14, 14])
+        x = x.reshape(batch_size, H, W, self.out_features).permute(0, 3, 1, 2)  # 首先变回(batch_size, 14, 14, out_features) #原来是view，改为reshape #torch.Size([200, 2048, 14, 14])
         x = x.permute(0, 2, 3, 1)  # 最后调整为(batch_size, 14, 14, 2048) 注意out_features应当对应2048
-        print("4") #目前4没有出现呢
-        print(x.shape) #torch.Size([200, 14, 14, 2048])
+
         return x
 
 # Based on restnet 101 model   Input（Resize image） output: (batch_size, encoded_image_size, encoded_image_size, 2048) 
@@ -141,7 +138,7 @@ class Attention(nn.Module):
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax(dim=1)  # softmax layer to calculate weights
 
-    def forward(self, encoder_out, decoder_hidden):
+    def forward(self, encoder_out, decoder_hidden):   #调用代码是：self.attention = Attention(encoder_dim, decoder_dim, attention_dim) 
         """
         Forward propagation.
 
@@ -181,7 +178,7 @@ class DecoderWithAttention(nn.Module):
         self.vocab_size = vocab_size
         self.dropout = dropout
 
-        self.attention = Attention(encoder_dim, decoder_dim, attention_dim)  # attention network
+        self.attention = Attention(encoder_dim, decoder_dim, attention_dim)  # attention network  是这行代码，让Attention model工作
 
         self.embedding = nn.Embedding(vocab_size, embed_dim)  # embedding layer
         self.dropout = nn.Dropout(p=self.dropout)
