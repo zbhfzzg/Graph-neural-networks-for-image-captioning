@@ -13,7 +13,7 @@ from nltk.translate.bleu_score import corpus_bleu
 
 # Data parameters
 data_folder = r'C:\\Users\\Bohan Zhang\\Documents\\GitHub\\Graph-neural-networks-for-image-captioning\\a-PyTorch-Tutorial-to-Image-Captioning-master\\output_data'  # folder with data files saved by create_input_files.py
-data_name = 'flickr8k_5_cap_per_img_5_min_word_freq'  # base name shared by data files
+data_name = 'flickr30k_5_cap_per_img_5_min_word_freq'  # base name shared by data files
 
 # Model parameters
 emb_dim = 512  # dimension of word embeddings
@@ -25,9 +25,9 @@ cudnn.benchmark = True  # set to true only if inputs to model are fixed size; ot
 
 # Training parameters
 start_epoch = 0
-epochs = 10  # number of epochs to train for (if early stopping is not triggered) #原为120
+epochs = 20  # number of epochs to train for (if early stopping is not triggered) #原为120
 epochs_since_improvement = 0  # keeps track of number of epochs since there's been an improvement in validation BLEU
-batch_size = 200  #原来是32
+batch_size = 180  #原来是32
 workers = 0  # for data-loading; right now, only 1 works with h5py    #把workers改为0了
 encoder_lr = 1e-4  # learning rate for encoder if fine-tuning
 decoder_lr = 4e-4  # learning rate for decoder
@@ -36,7 +36,7 @@ alpha_c = 1.  # regularization parameter for 'doubly stochastic attention', as i
 best_bleu4 = 0.  # BLEU-4 score right now
 print_freq = 100  # print training/validation stats every __ batches
 fine_tune_encoder = False  # fine-tune encoder?
-checkpoint = None  # path to checkpoint, None if none
+checkpoint = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\checkpoint\checkpoint_flickr30k_5_cap_per_img_5_min_word_freq.pth.tar'  # path to checkpoint, None if none 原来问题出在你这里！
 
 # 指定保存生成字幕的文件的路径
 output_dir = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\output_data'
@@ -195,8 +195,8 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer, decoder_
         
         # 将特征图和边索引传递给GCNModule ！！！！！！！！
         imgs = gcn_module(imgs)
-
-        scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens)
+        #print("Shape of encoder_out after GCN:", imgs.shape)
+        scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens) #实现了送出去
 
         # Since we decoded starting with <start>, the targets are all words after <start>, up to <end>
         targets = caps_sorted[:, 1:]
@@ -291,6 +291,7 @@ def validate(val_loader, encoder, decoder, criterion, gcn_module):
             # Forward prop.
             if encoder is not None:
                 imgs = encoder(imgs)
+                imgs = gcn_module(imgs)  # 这是新增加的行，使用GCN模块！！！！！！！！！！！！！！！！！！！
             scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens)
 
             # Since we decoded starting with <start>, the targets are all words after <start>, up to <end>

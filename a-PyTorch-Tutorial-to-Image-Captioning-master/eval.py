@@ -10,9 +10,9 @@ from tqdm import tqdm
 
 # Parameters
 data_folder = r'C:\\Users\\Bohan Zhang\\Documents\\GitHub\\Graph-neural-networks-for-image-captioning\\a-PyTorch-Tutorial-to-Image-Captioning-master\\output_data'  # folder with data files saved by create_input_files.py
-data_name = 'flickr8k_5_cap_per_img_5_min_word_freq'  # base name shared by data files   'flickr8k_5_cap_per_img_5_min_word_freq'
-checkpoint = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\checkpoint\checkpoint_flickr8k_5_cap_per_img_5_min_word_freq.pth.tar'  # model checkpoint
-word_map_file = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\output_data\WORDMAP_flickr8k_5_cap_per_img_5_min_word_freq.json'  # word map, ensure it's the same the data was encoded with and the model was trained with
+data_name = 'flickr30k_5_cap_per_img_5_min_word_freq'  # base name shared by data files   'flickr8k_5_cap_per_img_5_min_word_freq'
+checkpoint = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\checkpoint\BEST_checkpoint_flickr30k_5_cap_per_img_5_min_word_freq.pth.tar'  # model checkpoint
+word_map_file = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\output_data\WORDMAP_flickr30k_5_cap_per_img_5_min_word_freq.json'  # word map, ensure it's the same the data was encoded with and the model was trained with
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")  # sets device for model and PyTorch tensors
 cudnn.benchmark = True  # set to true only if inputs to model are fixed size; otherwise lot of computational overhead
 

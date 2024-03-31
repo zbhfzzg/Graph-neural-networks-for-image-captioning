@@ -142,15 +142,15 @@ class Attention(nn.Module):
         """
         Forward propagation.
 
-        :param encoder_out: encoded images, a tensor of dimension (batch_size, num_pixels, encoder_dim)
+        :param encoder_out: encoded images, a tensor of dimension (batch_size, num_pixels, encoder_dim) 问题是 GCN输出确定到了Attention layer了吗, 且要保证维度是(batch_size, num_pixels, encoder_dim)
         :param decoder_hidden: previous decoder output, a tensor of dimension (batch_size, decoder_dim)
         :return: attention weighted encoding, weights
         """
-        att1 = self.encoder_att(encoder_out)  # (batch_size, num_pixels, attention_dim)
-        att2 = self.decoder_att(decoder_hidden)  # (batch_size, attention_dim)
-        att = self.full_att(self.relu(att1 + att2.unsqueeze(1))).squeeze(2)  # (batch_size, num_pixels)
+        att1 = self.encoder_att(encoder_out)  # (batch_size, num_pixels, attention_dim) encoder_out通过一个线性层得到的，意在将编码后的图像特征投影到一个新的空间（即attention_dim）。
+        att2 = self.decoder_att(decoder_hidden)  # (batch_size, attention_dim) 是将decoder_hidden通过一个线性层得到的，将解码器隐状态投影到相同的新空间。
+        att = self.full_att(self.relu(att1 + att2.unsqueeze(1))).squeeze(2)  # (batch_size, num_pixels) 是将att1和att2相加后通过ReLU激活函数，再经过一个线性层得到的，用来计算每个像素的注意力得分。
         alpha = self.softmax(att)  # (batch_size, num_pixels)
-        attention_weighted_encoding = (encoder_out * alpha.unsqueeze(2)).sum(dim=1)  # (batch_size, encoder_dim)
+        attention_weighted_encoding = (encoder_out * alpha.unsqueeze(2)).sum(dim=1)  # (batch_size, encoder_dim) 是将encoder_out与alpha相乘并求和得到的，代表了加权后的编码器输出，将被用作解码器的输入。
 
         return attention_weighted_encoding, alpha
 
