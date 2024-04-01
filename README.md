@@ -74,3 +74,110 @@ Attention
 
 DecoderWithAttention
 解码器模块使用LSTM网络和注意力机制来生成图像的文本描述。它首先使用嵌入层将输入的文本标记转换为向量，然后结合编码器输出的图像特征和先前的隐藏状态来生成下一个单词的预测。
+
+修改：
+# 假设已经有了 GCN 模块的实现
+class GCN(nn.Module):
+    def __init__(self, in_features, out_features, num_pixels):
+        super(GCN, self).__init__()
+        # 这里添加你的 GCN 层初始化代码
+        self.gcn_layer = ...  # 你的 Graph Convolutional Layer
+
+    def forward(self, x):
+        # 假设 x 的形状是 (batch_size, in_features, num_pixels, num_pixels)
+        # 在这里应用 GCN 操作
+        gcn_output = self.gcn_layer(x)
+        # 确保 GCN 输出与输入有相同的形状
+        return gcn_output
+
+# Based on restnet 101 model with GCN
+class Encoder(nn.Module):
+    """
+    Encoder.
+    """
+
+    def __init__(self, encoded_image_size=14): #encoded_image_size=14 feature map size  
+        num_pixels = encoded_image_size * encoded_image_size
+        super(Encoder, self).__init__()
+        self.enc_image_size = encoded_image_size
+
+        #resnet = torchvision.models.resnet101(pretrained=True)  # pretrained ImageNet ResNet-101 已经不能够使用了，需要改为weight
+        resnet = torchvision.models.resnet101(weights=ResNet101_Weights.IMAGENET1K_V1)
+
+        # Remove linear and pool layers (since we're not doing classification)
+        modules = list(resnet.children())[:-2]
+        self.resnet = nn.Sequential(*modules)
+
+         # 假设你的GCN层将14x14x2048的特征图转换为同样大小的输出
+        self.gcn = GCN(in_features=2048, out_features=2048, num_pixels=num_pixels)
+
+
+        # 你可能需要初始化一个邻接矩阵来表示图的结构
+        self.adj_matrix = self.create_adj_matrix(encoded_image_size * encoded_image_size)
+
+        self.fine_tune()
+
+    def forward(self, images):   #前向传播，处理输入图像并产生编码后的图像，image是输入张量
+        """
+        Forward propagation.
+
+        :param images: images, a tensor of dimensions (batch_size, 3, image_size, image_size)
+        :return: encoded images
+        """
+        out = self.resnet(images)  # 输入图像张量然后输出特征图 (batch_size, 2048, image_size/32, image_size/32)
+        out = self.adaptive_pool(out)  #使用自适应平均池化层将特征图的空间维度（即宽度和高度）转换为预定义的 size (batch_size, 2048, encoded_image_size, encoded_image_size)
+        #out = out.permute(0, 2, 3, 1)  # (batch_size, encoded_image_size, encoded_image_size, 2048) 保持特定维度顺序，这个是后续attention layer工作所必需的
+
+        out = out.view(out.size(0), out.size(1), -1)  # 转换为(batch_size, 2048, num_pixels)
+        out = out.permute(0, 2, 1)  # 转换为(batch_size, num_pixels, 2048)
+
+        # 应用 GCN
+        gcn_out = self.gcn(out, self.adj_matrix)
+        gcn_out = gcn_out.permute(0, 2, 1).view(out.size(0), 2048, self.enc_image_size, self.enc_image_size)
+
+        return gcn_out.permute(0, 2, 3, 1)  # 转换为(batch_size, encoded_image_size, encoded_image_size, 2048)
+    
+    def create_adj_matrix(self, num_pixels):
+        # 初始化邻接矩阵, 可以是固定的，也可以基于某种标准动态生成
+        adj_matrix = torch.eye(num_pixels)
+        return adj_matrix
+
+    def fine_tune(self, fine_tune=True):
+        """
+        Allow or prevent the computation of gradients for convolutional blocks 2 through 4 of the encoder.
+
+        :param fine_tune: Allow?
+        """
+        for p in self.resnet.parameters():
+            p.requires_grad = False
+        # If fine-tuning, only fine-tune convolutional blocks 2 through 4
+        for c in list(self.resnet.children())[5:]:
+            for p in c.parameters():
+                p.requires_grad = fine_tune
+
+
+# 添加GCN代码逻辑
+1. ResNet-101 作为编码器
+目的：使用ResNet-101是为了从输入图像中提取丰富的特征。ResNet-101是一个深度残差网络，经过预训练可以捕获图像的多层次抽象表示。
+操作：你的Encoder类中首先使用了torchvision.models.resnet101，移除了最后的全连接层和池化层，因为我们对分类输出不感兴趣。我们只需要得到一个高维特征图。
+输出：对于每个输入图像，Encoder输出一个(batch_size, 2048, 14, 14)的特征张量，然后通过自适应平均池化层和调整维度，得到(batch_size, 14, 14, 2048)的特征图。这一步保证了即使输入图像尺寸不同，输出特征图的空间维度也是固定的。
+2. GCN 进一步提取特征
+目的：GCN的引入是为了利用图像内部区域（节点）之间的空间关系，从而捕获更加丰富的上下文信息。GCN可以帮助模型理解不同图像区域（如物体和背景）之间的相互作用。
+构建邻接矩阵：你首先根据每个图像的
+14
+×
+14
+14×14区域构建了一个邻接矩阵，表示这些区域（节点）之间的空间连接（基于8邻域连接）。这个邻接矩阵是固定的，因为每张图像都被处理成了相同的空间尺寸。
+操作：GCNModule接收Encoder的输出，并首先调整维度以匹配GCN的输入要求，然后应用图卷积网络。由于每张图像的结构相同，所以同一批次中的所有图像可以使用相同的edge_index。在GCN处理之后，特征图被恢复到与Encoder输出相同的维度(batch_size, 14, 14, 2048)。
+保持图像独立性：尽管我们在计算时将批次中的图像一起处理，但通过使用相同的edge_index并保持输出特征图的维度不变，我们确保了每张图像的特征提取过程是独立的。这意味着每张图像都有其对应的特征表示，可以与相应的字幕匹配，从而支持后续的图像字幕生成任务。
+
+# Attention 和Lstm的输入输出参数记录
+输入和输出：
+Attention Module
+
+输入：encoder_out, decoder_hidden
+输出：attention_weighted_encoding, alpha
+DecoderWithAttention Module
+
+输入：encoder_out, encoded_captions, caption_lengths
+输出：predictions, encoded_captions, decode_lengths, alphas, sort_ind

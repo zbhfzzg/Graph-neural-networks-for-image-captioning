@@ -248,7 +248,7 @@ class DecoderWithAttention(nn.Module):
         # Sort input data by decreasing lengths; why? apparent below
         caption_lengths, sort_ind = caption_lengths.squeeze(1).sort(dim=0, descending=True)
         encoder_out = encoder_out[sort_ind]
-        encoded_captions = encoded_captions[sort_ind]
+        encoded_captions = encoded_captions[sort_ind] #当前时间步的输入词语的编码。
 
         # Embedding
         embeddings = self.embedding(encoded_captions)  # (batch_size, max_caption_length, embed_dim)

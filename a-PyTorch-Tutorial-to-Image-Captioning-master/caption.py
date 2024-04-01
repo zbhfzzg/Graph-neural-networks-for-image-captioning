@@ -12,9 +12,9 @@ from PIL import Image
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 #变量位置
-image_path = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\test\test8.jpg'
-model_path = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\checkpoint\BEST_checkpoint_flickr30k_5_cap_per_img_5_min_word_freq.pth.tar'
-word_map_path = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\output_data\WORDMAP_flickr30k_5_cap_per_img_5_min_word_freq.json'
+image_path = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\test\test.jpg'
+model_path = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\checkpoint\checkpoint_flickr8k_5_cap_per_img_5_min_word_freq.pth.tar'
+word_map_path = r'C:\Users\Bohan Zhang\Documents\GitHub\Graph-neural-networks-for-image-captioning\a-PyTorch-Tutorial-to-Image-Captioning-master\output_data\WORDMAP_flickr8k_5_cap_per_img_5_min_word_freq.json'
 beam_size = 3
 smooth = True  # 或 False，取决于你是否想要平滑alpha覆盖
 
