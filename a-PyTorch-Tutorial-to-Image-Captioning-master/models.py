@@ -6,71 +6,64 @@ from torchvision.models.resnet import ResNet101_Weights
 from torch_geometric.nn import GCNConv # 用于GCN的model
 import torch_geometric.data as Data
 
+
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-#adjacency_matrix   output is adj_matrix  shape [196,196]
-def build_adjacency_matrix():
-    adj_matrix = np.zeros((196, 196))  # 创建一个196x196的邻接矩阵
-    for row in range(14):
-        for col in range(14):
-            index = row * 14 + col  # 将2D坐标转换为一维索引
-            # 对于每个节点，检查其8邻域
-            for i in range(max(0, row-1), min(row+2, 14)):
-                for j in range(max(0, col-1), min(col+2, 14)):
-                    if i == row and j == col:
-                        continue  # 跳过自身
-                    neighbor_index = i * 14 + j
-                    adj_matrix[index, neighbor_index] = 1  # 标记为邻居
-    return adj_matrix      
-
-#Convert adjacency matrix to edge index  使用边索引而不是邻接矩阵可以在某些场景下降低内存占用
-def adjacency_matrix_to_edge_index(adj_matrix):
-    edge_index = np.array(adj_matrix.nonzero())
-    return torch.tensor(edge_index, dtype=torch.long)
-
-# 构建邻接矩阵
-adj_matrix = build_adjacency_matrix()
-# 转换为边索引    一共1404个边 shape[2,1404] 2是source to target   这个时候图里面的关系就转换成了edge_index
-edge_index = adjacency_matrix_to_edge_index(adj_matrix)
-
-
-#GCN module Input: (batch_size, encoded_image_size, encoded_image_size, 2048)  Output (batch_size, encoded_image_size, encoded_image_size, 2048) 
 class GCNModule(nn.Module):
-    def __init__(self, in_features, hidden_features, out_features, edge_index, encoded_image_size=14, dropout_rate=0.5):
+    def __init__(self, in_features, out_features, k, encoded_image_size=14, dropout_rate=0.5):
         super(GCNModule, self).__init__()
-        self.in_features = in_features  # GCN输入特征维度
-        self.out_features = in_features  # 为了保持和ResNet输出一致，这里输出特征维度与输入相同
-        self.edge_index = edge_index  # 边索引
-        self.encoded_image_size = encoded_image_size  # 编码后的图像尺寸
-        # first layer of GCN，从in_features到hidden_features
-        self.gcn1 = GCNConv(in_features, hidden_features)
-        # Second layer of CN，从hidden_features到hidden_features
-        self.gcn2 = GCNConv(hidden_features, out_features)
-        self.relu = nn.ReLU()  # RelU
-        # Dropout layer
-        self.dropout = nn.Dropout(dropout_rate)
+        self.in_features = in_features
+        self.out_features = out_features
+        self.k = k
+        self.encoded_image_size = encoded_image_size
+        self.dropout_rate = dropout_rate
 
-    def forward(self, x):  #x is the output of Encoder. 缺少了邻接矩阵的输入呢！
-        batch_size, H, W, C = x.size()  # x的维度(batch_size, 14, 14, 2048)
-            #print(edge_index.shape)  #torch.Size([2, 1404])
-            #print(adj_matrix.shape)   
-            #print(x.shape) [200, 14, 14, 2048] 现在shape是正确的
-        x = x.permute(0, 3, 1, 2).reshape(-1, C)  # 调整x的维度为(N, in_features)  #原来是view，改为reshape permute 了之后[batch_size, channels, height, width]; N是196乘以batch_size,也就是图
-        #print(x.shape)  #现在的x size是这样的：torch.Size([39200, 2048]) batch size * 196
+        self.gcn1 = GCNConv(in_features, out_features)
+        self.gcn2 = GCNConv(out_features, out_features)
+        self.relu = nn.ReLU()
+        self.dropout = nn.Dropout(p=self.dropout_rate)
 
-        # 依次通过两层GCN
-        x = self.relu(self.gcn1(x, self.edge_index))  # 第一层GCN + ReLU; edge_index is here #torch.Size([39200, 1024])
-        x = self.dropout(x)
+    def forward(self, x):
+        device = x.device
+        batch_size, H, W, C = x.size()
+        # 将x展平以适配KNN计算
+        x_flat = x.reshape(batch_size * H * W, C)
 
-        # 第二层GCN + ReLU（在最后一层后也加ReLU）
-        x = self.relu(self.gcn2(x, self.edge_index))  #torch.Size([39200, 2048])
-        x = self.dropout(x)
+        # 计算KNN
+        knn_indices = self.compute_knn(x_flat)  # 计算KNN  # 增加的compute_knn方法用于计算KNN
 
-        # 将输出从GCN后的长列表转换回原始(batch_size, H, W, C)的形状
-        x = x.reshape(batch_size, H, W, self.out_features).permute(0, 3, 1, 2)  # 首先变回(batch_size, 14, 14, out_features) #原来是view，改为reshape #torch.Size([200, 2048, 14, 14])
-        x = x.permute(0, 2, 3, 1)  # 最后调整为(batch_size, 14, 14, 2048) 注意out_features应当对应2048
+        # 构建边索引
+        edge_index = self.build_edge_index(knn_indices, x_flat.size(0), device)
+
+        # GCN前向传播
+        x_flat = self.relu(self.gcn1(x_flat, edge_index))
+        x_flat = self.dropout(x_flat)
+        x_flat = self.relu(self.gcn2(x_flat, edge_index))
+        x_flat = self.dropout(x_flat)
+
+        # 将x恢复到原始形状
+        x = x_flat.view(batch_size, H, W, self.out_features)
 
         return x
+
+    def build_edge_index(self, knn_indices, num_nodes, device):
+        rows = torch.arange(0, num_nodes, device=device).repeat_interleave(self.k)
+        cols = knn_indices.reshape(-1)
+        edge_index = torch.stack([rows, cols], dim=0)
+        return edge_index
+    
+    def compute_knn(self, x_flat):
+        # 计算所有点对的欧式距离
+        distances = torch.cdist(x_flat, x_flat, p=2)
+
+        # 对每个点，找出k个最近的邻居的索引
+        # 忽略最近的邻居（即它自己），因此k+1
+        _, knn_indices = distances.topk(k=self.k + 1, largest=False, dim=1)
+
+        # 排除自身，保留其他最近的k个邻居
+        knn_indices = knn_indices[:, 1:]
+
+        return knn_indices
 
 # Based on restnet 101 model   Input（Resize image） output: (batch_size, encoded_image_size, encoded_image_size, 2048) 
 class Encoder(nn.Module):
@@ -242,7 +235,7 @@ class DecoderWithAttention(nn.Module):
         vocab_size = self.vocab_size
 
         # Flatten image
-        encoder_out = encoder_out.view(batch_size, -1, encoder_dim)  # (batch_size, num_pixels, encoder_dim)
+        encoder_out = encoder_out.contiguous().view(batch_size, -1, encoder_dim)  # (batch_size, num_pixels, encoder_dim)
         num_pixels = encoder_out.size(1)
 
         # Sort input data by decreasing lengths; why? apparent below
